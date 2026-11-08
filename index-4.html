@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caisse · Écran Royaum’</title>
+<style>
+:root{--ink:#14213d;--gold:#b8892b;--soft:#f6f0e2;--line:#e4dccb;--ok:#1d7a3a;--bad:#b3261e;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:var(--ink);font-family:Arial,Helvetica,sans-serif}
+main{max-width:480px;margin:0 auto;padding:16px 14px 40px}
+h1{font-family:Georgia,serif;font-size:1.35rem;margin:6px 0 2px}
+.sous{margin:0 0 12px;color:#5a6480}
+label{display:block;font-weight:bold;margin:12px 0 6px}
+select,input{width:100%;font-size:1.2rem;padding:11px;border:2px solid var(--line);border-radius:10px;color:var(--ink);background:#fff}
+input[readonly]{background:var(--soft)}
+.info{margin:8px 0 0;font-size:.95rem}
+.grille{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.grille button{font-size:1rem;font-weight:bold;padding:16px 8px;border-radius:12px;border:3px solid var(--gold);background:var(--ink);color:#fff;min-height:64px}
+.grille button.clair{background:#fff;color:var(--ink)}
+#zero{margin-top:12px;width:100%;padding:12px;border-radius:10px;border:2px solid var(--line);background:#fff;color:var(--ink);font-size:1rem}
+#msg{margin-top:12px;font-weight:bold;min-height:1.4em}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Écran client</h1>
+  <p class="sous">Choisissez le modèle, puis touchez un bouton : la télé parle.</p>
+
+  <div id="blocCat">
+    <label for="modele">Modèle</label>
+    <select id="modele"><option value="">— Choisir —</option></select>
+  </div>
+  <div id="blocManuel" hidden>
+    <label for="nomM">Modèle</label>
+    <input id="nomM" autocomplete="off">
+  </div>
+  <label for="prix">Prix</label>
+  <input id="prix" inputmode="numeric" autocomplete="off">
+  <p id="infoCat" class="info"></p>
+
+  <label for="remise">Remise fidélité (F) — calculée par la caisse</label>
+  <input id="remise" inputmode="numeric" autocomplete="off">
+
+  <div class="grille">
+    <button onclick="envoi('prix')">Prix<br>(nouveau client)</button>
+    <button onclick="envoi('fidele')">Client fidèle</button>
+    <button onclick="envoi('negocie')">Le client négocie</button>
+    <button onclick="envoi('petitprix')">Petit prix / promo</button>
+    <button onclick="envoi('fin')">Fin d’achat<br>(numéro WhatsApp)</button>
+    <button class="clair" onclick="envoi('recu')">Expliquer le reçu</button>
+    <button class="clair" onclick="envoi('echange')">Expliquer les échanges</button>
+    <button class="clair" onclick="envoi('accueil')">Accueil</button>
+  </div>
+  <button id="zero" onclick="envoi('zero')">Effacer l’écran</button>
+  <p id="msg"></p>
+</main>
+<script>
+var CANAL='https://ntfy.sh/rcelegance-ecran-k7q3vx92pm';
+var cat=[], parCat=false;
+
+function nombre(v){var n=parseInt(String(v==null?'':v).replace(/\D/g,''),10);return isNaN(n)?0:n;}
+function premier(o,cles){for(var i=0;i<cles.length;i++){if(o[cles[i]]!=null&&o[cles[i]]!=='')return o[cles[i]];}return null;}
+
+/* Lecture du catalogue de RC Comptes (même site, même téléphone). */
+function lireCatalogue(){
+  try{
+    var brut=JSON.parse(localStorage.getItem('rdc:cat')||'null');
+    var liste=Array.isArray(brut)?brut:(brut&&typeof brut==='object'?Object.keys(brut).map(function(k){var v=brut[k];if(v&&typeof v==='object'&&!v.nom&&!v.name)v.nom=k;return v;}):[]);
+    liste.forEach(function(it){
+      if(!it||typeof it!=='object')return;
+      var nom=premier(it,['nom','name','modele','model','produit','libelle','designation']);
+      var pv=nombre(premier(it,['pv','prix','prixVente','prix_vente','price','vente']));
+      var pa=nombre(premier(it,['pa','prixAchat','prix_achat','achat','cout']));
+      if(nom&&pv)cat.push({nom:String(nom),pv:pv,pa:pa});
+    });
+  }catch(e){}
+  cat.sort(function(a,b){return a.nom.localeCompare(b.nom,'fr');});
+  var s=document.getElementById('modele');
+  if(cat.length){
+    parCat=true;
+    cat.forEach(function(it,i){var o=document.createElement('option');o.value=i;o.textContent=it.nom+' — '+it.pv.toLocaleString('fr-FR')+' F';s.appendChild(o);});
+    document.getElementById('prix').readOnly=true;
+    document.getElementById('remise').readOnly=true;
+    document.getElementById('infoCat').textContent='Prix pris dans RC Comptes : non modifiable.';
+  }else{
+    document.getElementById('blocCat').hidden=true;
+    document.getElementById('blocManuel').hidden=false;
+    var i=document.getElementById('infoCat');
+    i.textContent='Catalogue RC Comptes introuvable sur ce téléphone : saisie manuelle.';i.className='info bad';
+  }
+}
+/* Remise fidélité selon la règle : bénéfice − 4 000 F, par tranches de 500 F, au plus 2 000 F par paire. */
+function remiseFidele(it){
+  if(!it.pa)return 0;
+  var r=Math.floor((it.pv-it.pa-4000)/500)*500;
+  return Math.max(0,Math.min(2000,r));
+}
+document.getElementById('modele').addEventListener('change',function(){
+  var it=cat[this.value];
+  document.getElementById('prix').value=it?it.pv:'';
+  document.getElementById('remise').value=it?remiseFidele(it):'';
+});
+
+function envoi(k){
+  var msg=document.getElementById('msg');
+  var nom=parCat?((cat[document.getElementById('modele').value]||{}).nom||''):document.getElementById('nomM').value.trim();
+  var d={k:k,nom:nom,prix:nombre(document.getElementById('prix').value),remise:nombre(document.getElementById('remise').value)};
+  if((k==='prix')&&!d.prix){msg.textContent='Choisissez d’abord le modèle.';msg.className='bad';return;}
+  msg.textContent='Envoi à la télé…';msg.className='';
+  fetch(CANAL,{method:'POST',body:JSON.stringify(d)})
+    .then(function(r){if(!r.ok)throw 0;msg.textContent='Envoyé : la télé annonce.';msg.className='ok';})
+    .catch(function(){msg.textContent='Pas envoyé. Vérifiez la connexion internet.';msg.className='bad';});
+}
+lireCatalogue();
+</script>
+</body>
+</html>
